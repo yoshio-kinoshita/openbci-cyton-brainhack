@@ -18,7 +18,8 @@
       "@/*": ["*"],
       "@entities/*": ["entities/*"],
       "@routes/*": ["routes/*"],
-      "@config/*": ["config/*"]
+      "@config/*": ["config/*"],
+      "@services/*": ["services/*"]
     }
   },
   "include": ["src"],

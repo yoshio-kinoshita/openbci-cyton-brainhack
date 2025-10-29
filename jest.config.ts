@@ -19,6 +19,7 @@ const config: Config = {
     '^@entities/(.*)$': '<rootDir>/src/entities/$1',
     '^@routes/(.*)$': '<rootDir>/src/routes/$1',
     '^@config/(.*)$': '<rootDir>/src/config/$1',
+    '^@services/(.*)$': '<rootDir>/src/services/$1',
   },
   collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts'],
 };

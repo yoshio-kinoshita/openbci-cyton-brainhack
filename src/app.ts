@@ -1,74 +1,258 @@
 import express from 'express';
+import type { ErrorRequestHandler } from 'express';
 
 import { apiRouter } from '@routes/index';
 
+const buildMenuPage = (): string =>
+  [
+    '<!doctype html>',
+    '<html lang="ja">',
+    '  <head>',
+    '    <meta charset="utf-8" />',
+    '    <meta name="viewport" content="width=device-width, initial-scale=1" />',
+    '    <title>脳波分析メニュー</title>',
+    '    <style>',
+    '      body { font-family: Arial, sans-serif; margin: 2rem; background: #f5f5f5; }',
+    '      header { margin-bottom: 1.5rem; }',
+    '      h1 { margin-bottom: 0.5rem; }',
+    '      p { color: #555; }',
+    '      ul { list-style: none; padding: 0; }',
+    '      li { background: #fff; margin-bottom: 0.75rem; padding: 1rem; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }',
+    '      a, button { color: #0066cc; text-decoration: none; font-weight: bold; cursor: pointer; }',
+    '      nav { margin-bottom: 1rem; }',
+    '    </style>',
+    '  </head>',
+    '  <body>',
+    '    <header>',
+    '      <h1>脳波分析メニュー</h1>',
+    '      <p>解析したい周波数帯を選択してください。初心者の方はアルファ波から始めるのがおすすめです。</p>',
+    '    </header>',
+    '    <nav>',
+    '      <a href="/upload">CSVアップロード画面へ移動</a>',
+    '    </nav>',
+    '    <main>',
+    '      <ul>',
+    '        <li>',
+    '          <h2>アルファ波解析</h2>',
+    '          <p>リラックス状態を示す 8〜13Hz の周波数帯を中心に確認します。初めてでも扱いやすい分析です。</p>',
+    '          <button id="alpha-start">アルファ波解析を開始</button>',
+    '        </li>',
+    '        <li>',
+    '          <h2>その他のバンド（近日公開）</h2>',
+    '          <p>ベータ波、デルタ波、ガンマ波などの分析機能は段階的に追加予定です。</p>',
+    '        </li>',
+    '      </ul>',
+    '    </main>',
+    '    <script>',
+    '      const alphaButton = document.getElementById("alpha-start");',
+    '      if (alphaButton) {',
+    '        alphaButton.addEventListener("click", async () => {',
+    '          alphaButton.disabled = true;',
+    '          alphaButton.textContent = "解析リクエスト送信中...";',
+    '          try {',
+    '            const response = await fetch("/api/analysis/alpha", { method: "POST" });',
+    '            const result = await response.json();',
+    '            alert(result.message ?? "解析リクエストを受け付けました。");',
+    '          } catch (error) {',
+    '            console.error(error);',
+    '            alert("解析リクエストの送信に失敗しました。時間をおいて再度お試しください。");',
+    '          } finally {',
+    '            alphaButton.disabled = false;',
+    '            alphaButton.textContent = "アルファ波解析を開始";',
+    '          }',
+    '        });',
+    '      }',
+    '    </script>',
+    '  </body>',
+    '</html>',
+  ].join('\n');
+
+const buildUploadPage = (): string => {
+  const lines = [
+    '<!doctype html>',
+    '<html lang="ja">',
+    '  <head>',
+    '    <meta charset="utf-8" />',
+    '    <meta name="viewport" content="width=device-width, initial-scale=1" />',
+    '    <title>OpenBCI CSV ビューア</title>',
+    '    <style>',
+    '      body { font-family: Arial, sans-serif; margin: 2rem; background: #f5f5f5; }',
+    '      h1 { margin-bottom: 1rem; }',
+    '      form { margin-bottom: 1.5rem; padding: 1rem; background: #fff; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }',
+    '      section { margin-bottom: 2rem; }',
+    '      table { width: 100%; border-collapse: collapse; background: #fff; }',
+    '      th, td { padding: 0.5rem; border: 1px solid #ddd; font-size: 0.9rem; }',
+    '      th { background: #f0f0f0; text-align: left; }',
+    '      .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }',
+    '      .card { background: #fff; border-radius: 0.5rem; padding: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }',
+    '      nav { margin-bottom: 1rem; }',
+    '      button { cursor: pointer; }',
+    '    </style>',
+    '  </head>',
+    '  <body>',
+    '    <nav>',
+    '      <a href="/">← メニューに戻る</a>',
+    '    </nav>',
+    '    <h1>OpenBCI CSV ビューア</h1>',
+    '    <form id="upload-form">',
+    '      <label for="csv-file">OpenBCI形式のCSVを選択:</label>',
+    '      <input id="csv-file" name="file" type="file" accept=".csv,text/csv" required />',
+    '      <button type="submit">アップロードして解析</button>',
+    '    </form>',
+    '    <section id="summary"></section>',
+    '    <section id="stats"></section>',
+    '    <section id="preview"></section>',
+    '    <script>',
+    '      const uploadForm = document.getElementById("upload-form");',
+    '      const fileInput = document.getElementById("csv-file");',
+    '      const summaryContainer = document.getElementById("summary");',
+    '      const statsContainer = document.getElementById("stats");',
+    '      const previewContainer = document.getElementById("preview");',
+    '      let latestSummary = null;',
+    '',
+    '      uploadForm.addEventListener("submit", async (event) => {',
+    '        event.preventDefault();',
+    '',
+    '        const file = fileInput.files && fileInput.files[0];',
+    '        if (!file) {',
+    '          alert("CSVファイルを選択してください。");',
+    '          return;',
+    '        }',
+    '',
+    '        const formData = new FormData();',
+    '        formData.append("file", file);',
+    '',
+    '        summaryContainer.innerHTML = "<p>解析中...</p>";',
+    '        statsContainer.innerHTML = "";',
+    '        previewContainer.innerHTML = "";',
+    '',
+    '        try {',
+    '          const response = await fetch("/api/upload/csv", {',
+    '            method: "POST",',
+    '            body: formData,',
+    '          });',
+    '',
+    '          if (!response.ok) {',
+    '            const errorBody = await response.json().catch(() => ({}));',
+    '            throw new Error(errorBody.message ?? "アップロードに失敗しました。");',
+    '          }',
+    '',
+    '          const result = await response.json();',
+    '          latestSummary = result.summary;',
+    '          renderSummary(result.summary);',
+    '          renderStats(result.channelStats);',
+    '          renderPreview(result.preview);',
+    '        } catch (error) {',
+    '          console.error(error);',
+  '          summaryContainer.innerHTML = "<p style="color:#d33;">解析に失敗しました。ファイル形式をご確認ください。</p>";',
+    '        }',
+    '      });',
+    '',
+    '      const renderSummary = (summary) => {',
+    '        const { boardType, sampleRateHz, channelCount, auxChannelCount, durationSeconds, rowCount } = summary;',
+    '        const boardLabel = boardType === "cyton-daisy" ? "Cyton + Daisy (16 ch)" : "Cyton (8 ch)";',
+    '        const cardLines = [',
+  '          "<div class="card">",',
+    '          "  <h2>解析概要</h2>",',
+    '          "  <ul>",',
+    '          "    <li>ボード種別: " + boardLabel + "</li>",',
+    '          "    <li>サンプルレート: " + (sampleRateHz ?? "不明") + " Hz</li>",',
+    '          "    <li>収録チャネル数: " + channelCount + "（補助 " + auxChannelCount + "）</li>",',
+    '          "    <li>収録データ行数: " + rowCount + "</li>",',
+    '          "    <li>推定収録時間: " + (durationSeconds ? durationSeconds.toFixed(2) + " 秒" : "不明") + "</li>",',
+    '          "  </ul>",',
+    '          "</div>",',
+    '        ];',
+    '        summaryContainer.innerHTML = cardLines.join("\n");',
+    '      };',
+    '',
+    '      const formatStat = (value) => (typeof value === "number" ? value.toFixed(3) : "n/a");',
+    '',
+    '      const renderStats = (stats) => {',
+    '        if (!Array.isArray(stats) || stats.length === 0) {',
+    '          statsContainer.innerHTML = "";',
+    '          return;',
+    '        }',
+    '',
+    '        const sampleInfo = latestSummary ? Math.min(latestSummary.rowCount, 2000) : "先頭データ";',
+    '        const cards = stats',
+    '          .map((stat) => {',
+    '            const card = [',
+  '              "<div class="card">",',
+    '              "  <h3>" + stat.column + "</h3>",',
+    '              "  <p>最小値: " + formatStat(stat.min) + "</p>",',
+    '              "  <p>最大値: " + formatStat(stat.max) + "</p>",',
+    '              "  <p>平均値: " + formatStat(stat.mean) + "</p>",',
+    '              "</div>",',
+    '            ];',
+  '            return card.join("\n");',
+  '          })',
+  '          .join("\n");',
+    '',
+    '        const container = [',
+    '          "<h2>チャネル統計（先頭 " + sampleInfo + " 行）</h2>",',
+  '          "<div class="stats-grid">" + cards + "</div>",',
+    '        ];',
+    '        statsContainer.innerHTML = container.join("\n");',
+    '      };',
+    '',
+    '      const renderPreview = (preview) => {',
+    '        if (!preview || !Array.isArray(preview.rows) || preview.rows.length === 0) {',
+    '          previewContainer.innerHTML = "";',
+    '          return;',
+    '        }',
+    '',
+  '        const headerHtml = preview.headers.map((header) => "<th>" + header + "</th>").join("");',
+  '        const rowHtml = preview.rows',
+  '          .map((row) => {',
+  '            const cells = row.map((value) => "<td>" + (value ?? "") + "</td>").join("");',
+  '            return "<tr>" + cells + "</tr>";',
+  '          })',
+  '          .join("");',
+    '',
+    '        const previewLines = [',
+    '          "<h2>先頭 " + preview.rows.length + " 行のプレビュー</h2>",',
+  '          "<div style="overflow-x: auto;">",',
+    '          "  <table>",',
+    '          "    <thead><tr>" + headerHtml + "</tr></thead>",',
+    '          "    <tbody>" + rowHtml + "</tbody>",',
+    '          "  </table>",',
+    '          "</div>",',
+    '        ];',
+    '        previewContainer.innerHTML = previewLines.join("\n");',
+    '      };',
+    '    </script>',
+    '  </body>',
+    '</html>',
+  ];
+
+  return lines.join('\n');
+};
+
 export const createApp = () => {
-    const app = express();
+  const app = express();
 
-        app.use(express.json());
-        app.use('/api', apiRouter);
+  app.use(express.json());
+  app.use('/api', apiRouter);
 
-            app.get('/', (_req, res) => {
-                const menuHtml = `<!doctype html>
-        <html lang="ja">
-            <head>
-                <meta charset="utf-8" />
-                <meta name="viewport" content="width=device-width, initial-scale=1" />
-                <title>脳波分析メニュー</title>
-                <style>
-                    body { font-family: Arial, sans-serif; margin: 2rem; background: #f5f5f5; }
-                    header { margin-bottom: 1.5rem; }
-                    h1 { margin-bottom: 0.5rem; }
-                    p { color: #555; }
-                    ul { list-style: none; padding: 0; }
-                    li { background: #fff; margin-bottom: 0.75rem; padding: 1rem; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-                    a { color: #0066cc; text-decoration: none; font-weight: bold; }
-                </style>
-            </head>
-            <body>
-                <header>
-                    <h1>脳波分析メニュー</h1>
-                    <p>解析したい周波数帯を選択してください。初心者の方はアルファ波から始めるのがおすすめです。</p>
-                </header>
-                <main>
-                    <ul>
-                        <li>
-                            <h2>アルファ波解析</h2>
-                            <p>リラックス状態を示す 8〜13Hz の周波数帯を中心に確認します。初めてでも扱いやすい分析です。</p>
-                                    <button id="alpha-start">アルファ波解析を開始</button>
-                        </li>
-                        <li>
-                            <h2>その他のバンド（近日公開）</h2>
-                            <p>ベータ波、デルタ波、ガンマ波などの分析機能は段階的に追加予定です。</p>
-                        </li>
-                    </ul>
-                </main>
-                    <script>
-                        const alphaButton = document.getElementById('alpha-start');
-                        if (alphaButton) {
-                            alphaButton.addEventListener('click', async () => {
-                                alphaButton.disabled = true;
-                                alphaButton.textContent = '解析リクエスト送信中...';
-                                try {
-                                    const response = await fetch('/api/analysis/alpha', { method: 'POST' });
-                                    const result = await response.json();
-                                    alert(result.message ?? '解析リクエストを受け付けました。');
-                                } catch (error) {
-                                    console.error(error);
-                                    alert('解析リクエストの送信に失敗しました。時間をおいて再度お試しください。');
-                                } finally {
-                                    alphaButton.disabled = false;
-                                    alphaButton.textContent = 'アルファ波解析を開始';
-                                }
-                            });
-                        }
-                    </script>
-                </body>
-        </html>`;
+  app.get('/', (_req, res) => {
+    res.type('html').send(buildMenuPage());
+  });
 
-                res.type('html').send(menuHtml);
-            });
+  app.get('/upload', (_req, res) => {
+    res.type('html').send(buildUploadPage());
+  });
 
-    return app;
+  const errorHandler: ErrorRequestHandler = (error, _req, res, next) => {
+    console.error('Unhandled error:', error);
+    if (res.headersSent) {
+      next(error);
+      return;
+    }
+    res.status(500).json({ message: 'サーバーエラーが発生しました。' });
+  };
 
+  app.use(errorHandler);
+
+  return app;
 };
